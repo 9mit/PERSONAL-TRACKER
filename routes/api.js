@@ -400,13 +400,16 @@ router.post('/api/submit', requireAuth, async (req, res) => {
         const activeLinks = (await getUserShareLinks(userEmail))
           .filter(l => l.date === date && !l.is_revoked && new Date(l.expires_at) > new Date());
         if (activeLinks.length > 0) {
+          // Fetch the actual DB dayRecord row (dayResult from recompute has different field names)
+          const freshDayRecord = await getDayRecord(userEmail, date);
           const slotsData = await getSlots(userEmail, date);
           const submissionsData = await getSubmissionsByUserDate(userEmail, date);
           const user = await getUserByEmail(userEmail);
           const sharedPayload = {
             owner: user?.display_name || userEmail,
+            ownerEmail: userEmail,
             date,
-            dayRecord: dayResult,
+            dayRecord: freshDayRecord,
             slots: slotsData,
             submissions: submissionsData.map(s => ({
               task_id: s.task_id,
@@ -517,6 +520,36 @@ router.patch('/api/submission/:submission_id', requireAuth, async (req, res) => 
         date: existing.date,
         dayRecord: dayResult
       });
+
+      // Push to shared link viewers
+      try {
+        const activeLinks = (await getUserShareLinks(existing.user_email))
+          .filter(l => l.date === existing.date && !l.is_revoked && new Date(l.expires_at) > new Date());
+        if (activeLinks.length > 0) {
+          const freshDayRecord = await getDayRecord(existing.user_email, existing.date);
+          const slotsData = await getSlots(existing.user_email, existing.date);
+          const submissionsData = await getSubmissionsByUserDate(existing.user_email, existing.date);
+          const user = await getUserByEmail(existing.user_email);
+          const sharedPayload = {
+            owner: user?.display_name || existing.user_email,
+            ownerEmail: existing.user_email,
+            date: existing.date,
+            dayRecord: freshDayRecord,
+            slots: slotsData,
+            submissions: submissionsData.map(s => ({
+              task_id: s.task_id, type: s.type,
+              questions_count: s.questions_count,
+              assigned_slot_index: s.assigned_slot_index,
+              timestamp_utc: s.timestamp_utc
+            }))
+          };
+          for (const link of activeLinks) {
+            req.app.io.to(`shared:${link.token}`).emit('shared_update', sharedPayload);
+          }
+        }
+      } catch (shareErr) {
+        console.error('[WS] Edit share broadcast error:', shareErr);
+      }
     }
 
     const updated = await getSubmission(submission_id);
@@ -650,6 +683,7 @@ router.post('/api/reprocess', requireAdmin, async (req, res) => {
             const submissionsData = await getSubmissionsByUserDate(u.email, date);
             const payload = {
               owner: u.display_name,
+              ownerEmail: u.email,
               date,
               dayRecord,
               slots: slotsData,
