@@ -508,6 +508,20 @@ router.get('/api/dashboard', requireAuth, async (req, res) => {
   }
 });
 
+router.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
+  try {
+    const date = req.query.date || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+    if (!isValidDate(date)) {
+      return res.status(400).json({ error: 'Invalid date' });
+    }
+    // Fetch dashboard metrics for ALL users (passing null for email)
+    const metrics = await getDashboardMetrics(date, null);
+    res.json({ date, ...metrics });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch admin global dashboard' });
+  }
+});
+
 // ─── Admin Routes ──────────────────────────────────────────────────────────────
 
 router.get('/api/submissions', requireAdmin, async (req, res) => {
