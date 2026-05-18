@@ -438,6 +438,94 @@ router.post('/api/submit', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Submission failed' });
   }
 });
+// ─── Edit Submission ────────────────────────────────────────────────────────────
+
+router.patch('/api/submission/:submission_id', requireAuth, async (req, res) => {
+  try {
+    const { submission_id } = req.params;
+    const { type, questions_count } = req.body;
+    const userEmail = req.user.email;
+
+    // Validate inputs
+    if (type && !['fresh', 'return'].includes(type)) {
+      return res.status(400).json({ error: 'Type must be "fresh" or "return"' });
+    }
+    const qCount = questions_count !== undefined ? parseInt(questions_count) : undefined;
+    if (qCount !== undefined && (!Number.isInteger(qCount) || qCount < 1 || qCount > 9999)) {
+      return res.status(400).json({ error: 'Questions count must be between 1 and 9999' });
+    }
+
+    // Fetch existing submission
+    const existing = await getSubmission(submission_id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Submission not found' });
+    }
+    // Only the owner can edit their own submission
+    if (existing.user_email !== userEmail && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Build update fields
+    const updates = [];
+    const values = [];
+    let paramIdx = 1;
+    const oldValues = { type: existing.type, questions_count: existing.questions_count };
+
+    if (type && type !== existing.type) {
+      updates.push(`type = $${paramIdx++}`);
+      values.push(type);
+    }
+    if (qCount !== undefined && qCount !== existing.questions_count) {
+      updates.push(`questions_count = $${paramIdx++}`);
+      values.push(qCount);
+    }
+
+    if (updates.length === 0) {
+      return res.json({ message: 'No changes detected', submission: existing });
+    }
+
+    // Execute update
+    values.push(submission_id);
+    await runSql(
+      `UPDATE submissions SET ${updates.join(', ')} WHERE submission_id = $${paramIdx}`,
+      values
+    );
+
+    // Recompute day record aggregates
+    const dayResult = await recomputeDayRecordFromSubmissions(existing.user_email, existing.date);
+
+    // Audit log with before/after
+    const newValues = {
+      type: type || existing.type,
+      questions_count: qCount !== undefined ? qCount : existing.questions_count
+    };
+    await addAuditLog('submission_edited', existing.user_email, submission_id, {
+      task_id: existing.task_id,
+      before: oldValues,
+      after: newValues
+    });
+
+    // Broadcast real-time update so all views refresh
+    if (req.app.io) {
+      req.app.io.to(`user:${existing.user_email}`).emit('submission_new', {
+        userEmail: existing.user_email,
+        date: existing.date,
+        dayRecord: dayResult
+      });
+      req.app.io.to(`dashboard:${existing.date}`).emit('submission_new', {
+        userEmail: existing.user_email,
+        date: existing.date,
+        dayRecord: dayResult
+      });
+    }
+
+    const updated = await getSubmission(submission_id);
+    res.json({ message: 'Submission updated', submission: updated, dayRecord: dayResult });
+  } catch (err) {
+    console.error('Edit submission error:', err);
+    res.status(500).json({ error: 'Failed to edit submission' });
+  }
+});
 
 // ─── Day Record / History Routes ───────────────────────────────────────────────
 

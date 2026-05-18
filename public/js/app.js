@@ -353,18 +353,101 @@ async function loadDayData() {
     }
 
     container.innerHTML = submissions.slice().reverse().map(s => `
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
-        <div>
-          <div style="font-size:.85rem;font-weight:600">${escapeHTML(s.task_id)}</div>
-          <div style="font-size:.72rem;color:var(--text-muted)">Slot ${s.assigned_slot_index} · ${s.questions_count} questions</div>
+      <div class="sub-item" data-sid="${escapeHTML(s.submission_id)}" style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div style="font-size:.85rem;font-weight:600">${escapeHTML(s.task_id)}</div>
+            <div style="font-size:.72rem;color:var(--text-muted)">Slot ${s.assigned_slot_index} · ${s.questions_count} questions</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="badge badge-${s.type}">${s.type}</span>
+            <button class="btn btn-sm btn-ghost edit-sub-btn" data-edit-id="${escapeHTML(s.submission_id)}" data-edit-type="${s.type}" data-edit-qcount="${s.questions_count}" title="Edit this submission" style="padding:4px 8px;font-size:.72rem">✏️</button>
+          </div>
         </div>
-        <span class="badge badge-${s.type}">${s.type}</span>
+        <div class="edit-panel" id="edit-${s.submission_id}" style="display:none;margin-top:10px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
+          <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+            <div class="form-group" style="margin-bottom:0;flex:1;min-width:100px">
+              <label class="form-label" style="font-size:.7rem">Type</label>
+              <select class="form-select edit-type" style="padding:6px;font-size:.82rem">
+                <option value="fresh" ${s.type === 'fresh' ? 'selected' : ''}>Fresh</option>
+                <option value="return" ${s.type === 'return' ? 'selected' : ''}>Return</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:0;flex:1;min-width:80px">
+              <label class="form-label" style="font-size:.7rem">Questions</label>
+              <input class="form-input edit-qcount" type="number" min="1" max="9999" value="${s.questions_count}" style="padding:6px;font-size:.82rem">
+            </div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-sm btn-primary save-edit-btn" style="padding:6px 14px;font-size:.75rem">Save</button>
+              <button class="btn btn-sm btn-ghost cancel-edit-btn" style="padding:6px 10px;font-size:.75rem">Cancel</button>
+            </div>
+          </div>
+        </div>
       </div>
     `).join('');
   } catch (err) {
     console.error('Load day data error:', err);
   }
 }
+
+// ─── Edit Submission (Event Delegation) ─────────────────────────────────────────
+
+document.addEventListener('click', async (e) => {
+  // Open edit panel
+  const editBtn = e.target.closest('.edit-sub-btn');
+  if (editBtn) {
+    const sid = editBtn.dataset.editId;
+    // Close any other open panels first
+    document.querySelectorAll('.edit-panel').forEach(p => p.style.display = 'none');
+    const panel = document.getElementById(`edit-${sid}`);
+    if (panel) panel.style.display = 'block';
+    return;
+  }
+
+  // Cancel edit
+  const cancelBtn = e.target.closest('.cancel-edit-btn');
+  if (cancelBtn) {
+    const panel = cancelBtn.closest('.edit-panel');
+    if (panel) panel.style.display = 'none';
+    return;
+  }
+
+  // Save edit
+  const saveBtn = e.target.closest('.save-edit-btn');
+  if (saveBtn) {
+    const panel = saveBtn.closest('.edit-panel');
+    const subItem = saveBtn.closest('.sub-item');
+    if (!panel || !subItem) return;
+
+    const sid = subItem.dataset.sid;
+    const newType = panel.querySelector('.edit-type').value;
+    const newQCount = parseInt(panel.querySelector('.edit-qcount').value);
+
+    if (!newQCount || newQCount < 1 || newQCount > 9999) {
+      showToast('Questions count must be between 1 and 9999', 'error');
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+
+    try {
+      await api(`/api/submission/${sid}`, {
+        method: 'PATCH',
+        body: { type: newType, questions_count: newQCount }
+      });
+      showToast('Submission updated successfully', 'success');
+      panel.style.display = 'none';
+      await loadDayData();
+    } catch (err) {
+      showToast(err.error || 'Edit failed', 'error');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+    return;
+  }
+});
 
 async function handleCheckout() {
   if (currentSlots.length === 0) {
