@@ -652,13 +652,22 @@ router.get('/api/export/:email/:date', requireAuth, async (req, res) => {
     freshRow.push(dayRecord ? dayRecord.grand_total_fresh : 0);
     returnRow.push(dayRecord ? dayRecord.grand_total_return : 0);
 
+    // Grand Total row = Fresh only
+    const grandTotalRow = ['Grand Total'];
+    for (let i = 1; i <= numSlots; i++) {
+      grandTotalRow.push(dayRecord ? dayRecord[`slot${i}_fresh`] : 0);
+    }
+    grandTotalRow.push(dayRecord ? dayRecord.grand_total_fresh : 0);
+
     const sheetData = [
       ['Date', date],
       ['Mail', email],
       [''],
       headerRow,
       freshRow,
-      returnRow
+      returnRow,
+      [''],
+      ['Grand Total (Fresh Only)', dayRecord ? dayRecord.grand_total_fresh : 0]
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(sheetData);
@@ -1021,7 +1030,7 @@ router.get('/api/admin/export-purge', requireAdmin, async (req, res) => {
     ];
 
     for (const dr of dayRecords) {
-      const grandTotal = dr.grand_total_fresh + dr.grand_total_return;
+      const grandTotal = dr.grand_total_fresh;
       summaryData.push([
         dr.user_email,
         dr.display_name,

@@ -255,7 +255,7 @@ async function loadDashboard() {
           <td style="font-weight:600">${escapeHTML(u.displayName)}</td>
           <td class="slot-fresh">${u.totalFresh}</td>
           <td class="slot-return">${u.totalReturn}</td>
-          <td style="font-weight:700">${total}</td>
+          <td style="font-weight:700">${u.totalFresh}</td>
           <td style="font-weight:700;color:${qColor}">${u.quality}%</td>
         </tr>`;
       }).join('');
