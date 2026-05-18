@@ -16,6 +16,7 @@
         <div>
           <h1 style="font-size:1.6rem;font-weight:800">Live Dashboard</h1>
           <p style="color:var(--text-dim);font-size:.85rem;margin-top:4px">Aggregated annotation metrics across all annotators</p>
+          <p id="user-email-display" style="color:var(--text-muted);font-size:.78rem;margin-top:2px"></p>
         </div>
         <div style="display:flex;gap:12px;align-items:center">
           <input class="form-input" type="date" id="dash-date" style="width:180px">
@@ -163,6 +164,7 @@ let socket = null;
   currentUser = await requireLogin();
   if (!currentUser) return;
   buildNav(currentUser, 'dashboard');
+  document.getElementById('user-email-display').textContent = currentUser.email || '';
   document.getElementById('dash-date').value = getTodayISO();
   document.getElementById('dash-date').addEventListener('change', () => { loadDashboard(); loadSubmissionsSheet(); });
   document.getElementById('export-btn').addEventListener('click', exportDashboard);

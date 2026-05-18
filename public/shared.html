@@ -215,6 +215,7 @@
         <div class="shared-hero">
           <div class="shared-icon">📊</div>
           <h1><span id="owner-name"></span>'s Dashboard</h1>
+          <p id="owner-email" style="color:var(--text-muted);font-size:.85rem;margin-top:4px"></p>
           <div class="shared-meta">
             <div class="shared-meta-item">
               <span class="meta-icon">📅</span>
@@ -414,9 +415,10 @@ function renderDashboard(data) {
   document.getElementById('error-state').style.display = 'none';
   document.getElementById('dashboard-content').style.display = 'block';
 
-  const { owner, date, dayRecord, slots, submissions } = data;
+  const { owner, ownerEmail, date, dayRecord, slots, submissions } = data;
 
   document.getElementById('owner-name').textContent = owner || 'Unknown';
+  document.getElementById('owner-email').textContent = ownerEmail || '';
   const d = new Date(date + 'T00:00:00');
   document.getElementById('shared-date').textContent = d.toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'

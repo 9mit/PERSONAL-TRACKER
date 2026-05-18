@@ -1019,6 +1019,7 @@ router.get('/api/shared/:token', async (req, res) => {
 
     res.json({
       owner: display_name,
+      ownerEmail: user_email,
       date,
       expiresAt: expires_at,
       dayRecord,
