@@ -614,6 +614,7 @@ router.get('/api/export/:email/:date', requireAuth, async (req, res) => {
   try {
     const { email, date } = req.params;
     const format = req.query.format || 'xlsx';
+    const shouldPurge = req.query.purge !== 'false'; // defaults to true for backward compat
 
     if (!isValidEmail(email) || !isValidDate(date)) {
       return res.status(400).json({ error: 'Invalid email or date' });
@@ -704,14 +705,14 @@ router.get('/api/export/:email/:date', requireAuth, async (req, res) => {
     if (format === 'csv') {
       const csv = XLSX.utils.sheet_to_csv(ws);
       
-      // PURGE database submissions for this user & date on download success
-      if (submissions.length > 0) {
+      // PURGE database submissions for this user & date on download success (if requested)
+      if (shouldPurge && submissions.length > 0) {
         const subIds = submissions.map(s => s.submission_id);
         await runSql('DELETE FROM submissions WHERE submission_id = ANY($1)', [subIds]);
       }
       
       // Audit log
-      await addAuditLog('user_export_purge', email, null, { date, format, submissionsPurged: submissions.length });
+      await addAuditLog(shouldPurge ? 'user_export_purge' : 'user_export', email, null, { date, format, submissionsPurged: shouldPurge ? submissions.length : 0 });
       
       // Build filename: Name_DDMMYY.csv
       const safeName = user.display_name.replace(/[^a-zA-Z0-9]/g, '') || 'Report';
@@ -725,14 +726,14 @@ router.get('/api/export/:email/:date', requireAuth, async (req, res) => {
 
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
-    // PURGE database submissions for this user & date on download success
-    if (submissions.length > 0) {
+    // PURGE database submissions for this user & date on download success (if requested)
+    if (shouldPurge && submissions.length > 0) {
       const subIds = submissions.map(s => s.submission_id);
       await runSql('DELETE FROM submissions WHERE submission_id = ANY($1)', [subIds]);
     }
 
     // Audit log
-    await addAuditLog('user_export_purge', email, null, { date, format, submissionsPurged: submissions.length });
+    await addAuditLog(shouldPurge ? 'user_export_purge' : 'user_export', email, null, { date, format, submissionsPurged: shouldPurge ? submissions.length : 0 });
 
     // Build filename: Name_DDMMYY.xlsx
     const safeName = user.display_name.replace(/[^a-zA-Z0-9]/g, '') || 'Report';
@@ -745,6 +746,45 @@ router.get('/api/export/:email/:date', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Export error:', err);
     res.status(500).json({ error: 'Export failed' });
+  }
+});
+
+// ─── User Submissions Delete Route ────────────────────────────────────────────
+
+router.delete('/api/user-submissions/:email/:date', requireAuth, async (req, res) => {
+  try {
+    const { email, date } = req.params;
+    if (!isValidEmail(email) || !isValidDate(date)) {
+      return res.status(400).json({ error: 'Invalid email or date' });
+    }
+    if (!canAccessEmail(req, email)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const submissions = await getSubmissionsByUserDate(email, date);
+    if (submissions.length === 0) {
+      return res.json({ deleted: 0, message: 'No submissions to delete' });
+    }
+
+    const subIds = submissions.map(s => s.submission_id);
+    await runSql('DELETE FROM submissions WHERE submission_id = ANY($1)', [subIds]);
+
+    // Recompute day record after deletion
+    await recomputeDayRecordFromSubmissions(email, date);
+
+    // Audit log
+    await addAuditLog('user_delete_entries', email, null, { date, deletedCount: subIds.length });
+
+    // Broadcast real-time update so dashboard refreshes
+    if (req.app.io) {
+      req.app.io.to(`user:${email}`).emit('dashboard_refresh', { date });
+      req.app.io.to(`dashboard:${date}`).emit('dashboard_refresh', { date });
+    }
+
+    res.json({ deleted: subIds.length, message: `Deleted ${subIds.length} submissions` });
+  } catch (err) {
+    console.error('Delete user submissions error:', err);
+    res.status(500).json({ error: 'Failed to delete submissions' });
   }
 });
 

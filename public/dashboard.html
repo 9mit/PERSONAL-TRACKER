@@ -58,6 +58,36 @@
         </div>
       </div>
 
+      <!-- Submission Sheet (Sheet 2 Style) -->
+      <div class="card" id="submissions-sheet-card" style="margin-top:24px">
+        <div class="card-header">
+          <div>
+            <div class="card-title">📋 Submission Sheet</div>
+            <div class="card-subtitle">Detailed task log for the selected date</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span id="sheet-entry-count" style="font-size:.75rem;color:var(--text-muted);font-weight:700;background:rgba(14,165,233,0.12);border:1px solid rgba(14,165,233,0.25);padding:4px 12px;border-radius:20px">0 entries</span>
+            <button class="btn btn-sm btn-ghost" id="download-sheet-btn" title="Download XLSX (without deleting entries)">⬇ Download</button>
+            <button class="btn btn-sm btn-ghost" id="delete-entries-btn" style="color:var(--danger)" title="Permanently delete all entries for this date">🗑 Delete</button>
+          </div>
+        </div>
+        <div class="table-wrap" style="max-height:520px;overflow-y:auto" id="submissions-sheet-wrap">
+          <table class="data-table" style="min-width:600px">
+            <thead style="position:sticky;top:0;z-index:1">
+              <tr>
+                <th style="width:40px">#</th>
+                <th>Task ID</th>
+                <th>Type</th>
+                <th>Questions</th>
+                <th>Slot</th>
+                <th>Timestamp (IST)</th>
+              </tr>
+            </thead>
+            <tbody id="sheet-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- Persistent Active Shared Links Card -->
       <div class="card" id="shared-links-card" style="margin-top:24px;display:none">
         <div class="card-header">
@@ -134,15 +164,18 @@ let socket = null;
   if (!currentUser) return;
   buildNav(currentUser, 'dashboard');
   document.getElementById('dash-date').value = getTodayISO();
-  document.getElementById('dash-date').addEventListener('change', loadDashboard);
+  document.getElementById('dash-date').addEventListener('change', () => { loadDashboard(); loadSubmissionsSheet(); });
   document.getElementById('export-btn').addEventListener('click', exportDashboard);
+  document.getElementById('download-sheet-btn').addEventListener('click', downloadSheetOnly);
+  document.getElementById('delete-entries-btn').addEventListener('click', deleteEntries);
   await loadDashboard();
+  await loadSubmissionsSheet();
 
-  const throttledLoadDashboard = throttle(loadDashboard, 3000);
+  const throttledRefresh = throttle(() => { loadDashboard(); loadSubmissionsSheet(); }, 3000);
   socket = connectSocket(currentUser.email, getTodayISO());
   if (socket) {
-    socket.on('submission_new', () => throttledLoadDashboard());
-    socket.on('dashboard_refresh', () => loadDashboard());
+    socket.on('submission_new', () => throttledRefresh());
+    socket.on('dashboard_refresh', () => { loadDashboard(); loadSubmissionsSheet(); });
   }
 
   // Share modal
@@ -245,6 +278,93 @@ async function exportDashboard() {
     URL.revokeObjectURL(url);
     showToast('Export downloaded', 'success');
   } catch { showToast('Export failed', 'error'); }
+}
+
+// ─── Submission Sheet ───────────────────────────────────────────────────────────
+
+async function loadSubmissionsSheet() {
+  const date = document.getElementById('dash-date').value;
+  try {
+    const data = await api(`/api/day/${currentUser.email}/${date}`);
+    const submissions = data.submissions || [];
+    const countEl = document.getElementById('sheet-entry-count');
+    const tbody = document.getElementById('sheet-tbody');
+
+    countEl.textContent = `${submissions.length} entr${submissions.length === 1 ? 'y' : 'ies'}`;
+
+    if (submissions.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:32px">No submissions for this date</td></tr>`;
+      return;
+    }
+
+    // Build rows — handle up to 2000+ entries efficiently with a single innerHTML write
+    const istFormatter = new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric', month: 'short', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: true
+    });
+
+    const rows = new Array(submissions.length);
+    for (let i = 0; i < submissions.length; i++) {
+      const s = submissions[i];
+      const ts = s.timestamp_utc ? istFormatter.format(new Date(s.timestamp_utc)) : '-';
+      const typeClass = s.type === 'fresh' ? 'badge-fresh' : 'badge-return';
+      rows[i] = `<tr>
+        <td style="color:var(--text-muted);font-size:.75rem">${i + 1}</td>
+        <td style="font-weight:600;font-size:.85rem">${escapeHTML(s.task_id)}</td>
+        <td><span class="badge ${typeClass}">${s.type}</span></td>
+        <td style="text-align:center">${s.questions_count}</td>
+        <td>Slot ${s.assigned_slot_index || '-'}</td>
+        <td style="font-size:.78rem;white-space:nowrap">${ts}</td>
+      </tr>`;
+    }
+    tbody.innerHTML = rows.join('');
+  } catch (err) {
+    console.error('Load submissions sheet error:', err);
+  }
+}
+
+async function downloadSheetOnly() {
+  const date = document.getElementById('dash-date').value;
+  const btn = document.getElementById('download-sheet-btn');
+  btn.disabled = true;
+  btn.textContent = 'Downloading...';
+  try {
+    const response = await fetch(`/api/export/${currentUser.email}/${date}?format=xlsx&purge=false`, { credentials: 'same-origin' });
+    if (!response.ok) throw new Error('Download failed');
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeName = (currentUser.displayName || 'Report').replace(/[^a-zA-Z0-9]/g, '');
+    const [y, m, d] = date.split('-');
+    a.href = url; a.download = `${safeName}_${d}${m}${y.slice(2)}.xlsx`; a.click();
+    URL.revokeObjectURL(url);
+    showToast('Sheet downloaded successfully', 'success');
+  } catch { showToast('Download failed', 'error'); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = '⬇ Download';
+  }
+}
+
+async function deleteEntries() {
+  const date = document.getElementById('dash-date').value;
+  const countText = document.getElementById('sheet-entry-count').textContent;
+  if (!confirm(`🗑 Delete All Entries\n\nThis will permanently delete all your submission entries for ${date}.\n\nThis action cannot be undone. Are you sure?`)) return;
+
+  const btn = document.getElementById('delete-entries-btn');
+  btn.disabled = true;
+  try {
+    await api(`/api/user-submissions/${currentUser.email}/${date}`, { method: 'DELETE' });
+    showToast('All entries deleted', 'success');
+    await loadDashboard();
+    await loadSubmissionsSheet();
+  } catch (err) {
+    showToast(err.error || 'Delete failed', 'error');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ─── Share Modal ────────────────────────────────────────────────────────────────
