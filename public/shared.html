@@ -228,12 +228,12 @@
           <div id="expiry-countdown" class="expiry-badge" style="display:none"></div>
         </div>
 
-        <!-- Grand totals -->
-        <div class="grid-4" style="margin-bottom:28px" id="stats-grid">
-          <div class="card stat-card"><div class="stat-value" id="s-total-fresh">0</div><div class="stat-label">Fresh Total</div></div>
-          <div class="card stat-card accent"><div class="stat-value" id="s-total-return">0</div><div class="stat-label">Return Total</div></div>
-          <div class="card stat-card success"><div class="stat-value" id="s-grand-total">0</div><div class="stat-label">Grand Total</div></div>
-          <div class="card stat-card warning"><div class="stat-value" id="s-quality">100%</div><div class="stat-label">Quality</div></div>
+        <!-- Grand Fresh Total -->
+        <div style="display:flex;justify-content:center;margin-bottom:28px">
+          <div class="card stat-card success" style="min-width:220px;text-align:center">
+            <div class="stat-value" id="s-total-fresh" style="font-size:2.8rem">0</div>
+            <div class="stat-label" style="font-size:.9rem">Grand Fresh Total</div>
+          </div>
         </div>
 
         <!-- Per-slot breakdown -->
@@ -423,16 +423,9 @@ function renderDashboard(data) {
   });
   document.title = `${owner}'s Dashboard — ${date}`;
 
-  // Grand totals
+  // Grand Fresh Total (only metric visible on shared link)
   const fresh = dayRecord ? (dayRecord.grand_total_fresh || 0) : 0;
-  const ret = dayRecord ? (dayRecord.grand_total_return || 0) : 0;
-  const total = fresh + ret;
-  const quality = total > 0 ? Math.round((fresh / total) * 100) : 100;
-
   animateValue('s-total-fresh', fresh);
-  animateValue('s-total-return', ret);
-  animateValue('s-grand-total', fresh);
-  document.getElementById('s-quality').textContent = quality + '%';
 
   // Slot grid
   const slotGrid = document.getElementById('slot-grid');
@@ -441,12 +434,11 @@ function renderDashboard(data) {
   } else {
     slotGrid.innerHTML = slots.map(s => {
       const slotFresh = dayRecord ? (dayRecord[`slot${s.slot_index}_fresh`] || 0) : 0;
-      const slotReturn = dayRecord ? (dayRecord[`slot${s.slot_index}_return`] || 0) : 0;
       return `
         <div class="shared-slot-card">
           <div class="shared-slot-label">Slot ${s.slot_index}</div>
           <div class="shared-slot-value">${slotFresh}</div>
-          <div class="shared-slot-sub">${slotReturn} return${slotReturn !== 1 ? 's' : ''}</div>
+          <div class="shared-slot-sub">fresh entries</div>
           <div class="shared-slot-time">${formatTime12h(s.start_time)} – ${formatTime12h(s.end_time)}</div>
         </div>
       `;
