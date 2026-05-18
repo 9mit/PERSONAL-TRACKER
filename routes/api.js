@@ -47,6 +47,40 @@ function parseInteger(value, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER 
   return parsed;
 }
 
+// ─── Shared Broadcast Helper ───────────────────────────────────────────────────
+
+async function broadcastSharedUpdate(io, userEmail, date) {
+  if (!io) return;
+  try {
+    const activeLinks = (await getUserShareLinks(userEmail))
+      .filter(l => l.date === date && !l.is_revoked && new Date(l.expires_at) > new Date());
+    if (activeLinks.length > 0) {
+      const freshDayRecord = await getDayRecord(userEmail, date);
+      const slotsData = await getSlots(userEmail, date);
+      const submissionsData = await getSubmissionsByUserDate(userEmail, date);
+      const user = await getUserByEmail(userEmail);
+      const sharedPayload = {
+        owner: user?.display_name || userEmail,
+        ownerEmail: userEmail,
+        date,
+        dayRecord: freshDayRecord,
+        slots: slotsData,
+        submissions: submissionsData.map(s => ({
+          task_id: s.task_id, type: s.type,
+          questions_count: s.questions_count,
+          assigned_slot_index: s.assigned_slot_index,
+          timestamp_utc: s.timestamp_utc
+        }))
+      };
+      for (const link of activeLinks) {
+        io.to(`shared:${link.token}`).emit('shared_update', sharedPayload);
+      }
+    }
+  } catch (err) {
+    console.error('[WS] Shared broadcast error:', err);
+  }
+}
+
 // ─── Health Check ──────────────────────────────────────────────────────────────
 
 router.get('/api/health', (req, res) => {
@@ -237,6 +271,7 @@ router.post('/api/slots', requireAuth, async (req, res) => {
     if (req.app.io) {
       req.app.io.to(`user:${userEmail}`).emit('slots_updated', { userEmail, date });
       req.app.io.to(`dashboard:${date}`).emit('slots_updated', { userEmail, date });
+      await broadcastSharedUpdate(req.app.io, userEmail, date);
     }
 
     res.json({ success: true, slots: await getSlots(userEmail, date) });
@@ -262,6 +297,13 @@ router.delete('/api/slots', requireAuth, async (req, res) => {
 
     await deleteSlot(userEmail, date, normalizedSlotIndex);
     await addAuditLog('slot_deleted', userEmail, null, { date, slotIndex: normalizedSlotIndex });
+
+    // Broadcast update
+    if (req.app.io) {
+      req.app.io.to(`user:${userEmail}`).emit('slots_updated', { userEmail, date });
+      req.app.io.to(`dashboard:${date}`).emit('slots_updated', { userEmail, date });
+      await broadcastSharedUpdate(req.app.io, userEmail, date);
+    }
 
     res.json({ success: true, slots: await getSlots(userEmail, date) });
   } catch (err) {
@@ -396,36 +438,7 @@ router.post('/api/submit', requireAuth, async (req, res) => {
       req.app.io.to(`dashboard:${date}`).emit('submission_new', newSubmissionPayload);
 
       // Push full payload to shared link viewers
-      try {
-        const activeLinks = (await getUserShareLinks(userEmail))
-          .filter(l => l.date === date && !l.is_revoked && new Date(l.expires_at) > new Date());
-        if (activeLinks.length > 0) {
-          // Fetch the actual DB dayRecord row (dayResult from recompute has different field names)
-          const freshDayRecord = await getDayRecord(userEmail, date);
-          const slotsData = await getSlots(userEmail, date);
-          const submissionsData = await getSubmissionsByUserDate(userEmail, date);
-          const user = await getUserByEmail(userEmail);
-          const sharedPayload = {
-            owner: user?.display_name || userEmail,
-            ownerEmail: userEmail,
-            date,
-            dayRecord: freshDayRecord,
-            slots: slotsData,
-            submissions: submissionsData.map(s => ({
-              task_id: s.task_id,
-              type: s.type,
-              questions_count: s.questions_count,
-              assigned_slot_index: s.assigned_slot_index,
-              timestamp_utc: s.timestamp_utc
-            }))
-          };
-          for (const link of activeLinks) {
-            req.app.io.to(`shared:${link.token}`).emit('shared_update', sharedPayload);
-          }
-        }
-      } catch (shareErr) {
-        console.error('[WS] Share broadcast error:', shareErr);
-      }
+      await broadcastSharedUpdate(req.app.io, userEmail, date);
     }
 
     res.json({
@@ -522,34 +535,7 @@ router.patch('/api/submission/:submission_id', requireAuth, async (req, res) => 
       });
 
       // Push to shared link viewers
-      try {
-        const activeLinks = (await getUserShareLinks(existing.user_email))
-          .filter(l => l.date === existing.date && !l.is_revoked && new Date(l.expires_at) > new Date());
-        if (activeLinks.length > 0) {
-          const freshDayRecord = await getDayRecord(existing.user_email, existing.date);
-          const slotsData = await getSlots(existing.user_email, existing.date);
-          const submissionsData = await getSubmissionsByUserDate(existing.user_email, existing.date);
-          const user = await getUserByEmail(existing.user_email);
-          const sharedPayload = {
-            owner: user?.display_name || existing.user_email,
-            ownerEmail: existing.user_email,
-            date: existing.date,
-            dayRecord: freshDayRecord,
-            slots: slotsData,
-            submissions: submissionsData.map(s => ({
-              task_id: s.task_id, type: s.type,
-              questions_count: s.questions_count,
-              assigned_slot_index: s.assigned_slot_index,
-              timestamp_utc: s.timestamp_utc
-            }))
-          };
-          for (const link of activeLinks) {
-            req.app.io.to(`shared:${link.token}`).emit('shared_update', sharedPayload);
-          }
-        }
-      } catch (shareErr) {
-        console.error('[WS] Edit share broadcast error:', shareErr);
-      }
+      await broadcastSharedUpdate(req.app.io, existing.user_email, existing.date);
     }
 
     const updated = await getSubmission(submission_id);
@@ -675,29 +661,7 @@ router.post('/api/reprocess', requireAdmin, async (req, res) => {
       try {
         const allUsers = await getAllUsers();
         for (const u of allUsers) {
-          const links = (await getUserShareLinks(u.email))
-            .filter(l => l.date === date && !l.is_revoked && new Date(l.expires_at) > new Date());
-          if (links.length > 0) {
-            const dayRecord = await getDayRecord(u.email, date);
-            const slotsData = await getSlots(u.email, date);
-            const submissionsData = await getSubmissionsByUserDate(u.email, date);
-            const payload = {
-              owner: u.display_name,
-              ownerEmail: u.email,
-              date,
-              dayRecord,
-              slots: slotsData,
-              submissions: submissionsData.map(s => ({
-                task_id: s.task_id, type: s.type,
-                questions_count: s.questions_count,
-                assigned_slot_index: s.assigned_slot_index,
-                timestamp_utc: s.timestamp_utc
-              }))
-            };
-            for (const link of links) {
-              req.app.io.to(`shared:${link.token}`).emit('shared_update', payload);
-            }
-          }
+          await broadcastSharedUpdate(req.app.io, u.email, date);
         }
       } catch (e) { console.error('[WS] Reprocess share broadcast error:', e); }
     }
@@ -910,6 +874,7 @@ router.delete('/api/user-submissions/:email/:date', requireAuth, async (req, res
     if (req.app.io) {
       req.app.io.to(`user:${email}`).emit('dashboard_refresh', { date });
       req.app.io.to(`dashboard:${date}`).emit('dashboard_refresh', { date });
+      await broadcastSharedUpdate(req.app.io, email, date);
     }
 
     res.json({ deleted: subIds.length, message: `Deleted ${subIds.length} submissions` });
