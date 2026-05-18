@@ -1,0 +1,29 @@
+{
+  "name": "annotation-tracker-pro",
+  "version": "1.0.0",
+  "description": "Production-grade annotation tracking system with live aggregation, time slots, and spreadsheet exports",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "compression": "^1.7.5",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "express-session": "^1.18.1",
+    "googleapis": "^171.4.0",
+    "helmet": "^8.0.0",
+    "pg": "^8.11.3",
+    "socket.io": "^4.8.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "vitest": "^3.1.0"
+  }
+}

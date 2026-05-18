@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>History — Personal Tracker</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <nav class="top-nav" id="top-nav"></nav>
+  <div class="page-content">
+    <div class="container">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;flex-wrap:wrap;gap:12px">
+        <div>
+          <h1 style="font-size:1.6rem;font-weight:800">My History</h1>
+          <p style="color:var(--text-dim);font-size:.85rem;margin-top:4px">Your daily annotation records</p>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <input class="form-input" type="date" id="start-date" style="width:160px">
+          <span style="color:var(--text-muted)">to</span>
+          <input class="form-input" type="date" id="end-date" style="width:160px">
+          <button class="btn btn-sm btn-primary" id="filter-btn">Filter</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Date</th><th>Slot 1</th><th>Slot 2</th><th>Slot 3</th><th>Slot 4</th><th>Fresh</th><th>Returns</th><th>Quality</th><th>Actions</th></tr></thead>
+            <tbody id="history-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/utils.js"></script>
+<script>
+let currentUser = null;
+(async () => {
+  currentUser = await requireLogin();
+  if (!currentUser) return;
+  buildNav(currentUser, 'history');
+  const today = getTodayISO();
+  const d = new Date(); d.setDate(d.getDate() - 30);
+  document.getElementById('end-date').value = today;
+  document.getElementById('start-date').value = d.toISOString().split('T')[0];
+  document.getElementById('filter-btn').addEventListener('click', () => {
+    loadHistory(document.getElementById('start-date').value, document.getElementById('end-date').value);
+  });
+  await loadHistory();
+})();
+
+async function loadHistory(startDate, endDate) {
+  try {
+    let url = `/api/history/${currentUser.email}`;
+    if (startDate && endDate) url += `?startDate=${startDate}&endDate=${endDate}`;
+    const data = await api(url);
+    const records = data.history;
+    const tbody = document.getElementById('history-tbody');
+    if (!records || records.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:32px">No records found</td></tr>';
+      return;
+    }
+    tbody.innerHTML = records.map(r => {
+      const total = r.grand_total_fresh + r.grand_total_return;
+      const q = total === 0 ? 100 : Math.round((r.grand_total_fresh / total) * 100);
+      const qColor = q >= 90 ? 'var(--success)' : q >= 70 ? 'var(--warning)' : 'var(--danger)';
+      return `<tr>
+        <td style="font-weight:600">${formatDate(r.date)}</td>
+        <td class="slot-cell slot-fresh">${r.slot1_fresh}</td>
+        <td class="slot-cell slot-fresh">${r.slot2_fresh}</td>
+        <td class="slot-cell slot-fresh">${r.slot3_fresh}</td>
+        <td class="slot-cell slot-fresh">${r.slot4_fresh}</td>
+        <td style="font-weight:700">${r.grand_total_fresh}</td>
+        <td class="slot-return">${r.grand_total_return}</td>
+        <td style="font-weight:700;color:${qColor}">${q}%</td>
+        <td>
+          <a href="/api/export/${currentUser.email}/${r.date}?format=xlsx" class="btn btn-sm btn-ghost" download>⬇ XLSX</a>
+          <a href="/api/export/${currentUser.email}/${r.date}?format=csv" class="btn btn-sm btn-ghost" download>⬇ CSV</a>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    showToast('Failed to load history', 'error');
+  }
+}
+</script>
+</body>
+</html>

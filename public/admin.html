@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — Personal Tracker</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <nav class="top-nav" id="top-nav"></nav>
+  <div class="page-content">
+    <div class="container">
+      <h1 style="font-size:1.6rem;font-weight:800;margin-bottom:28px">Admin Dashboard</h1>
+
+      <div class="grid-2" style="margin-bottom:28px">
+        <!-- Reprocess Card -->
+        <div class="card">
+          <div class="card-title" style="margin-bottom:16px">🔄 Reprocess Day Records</div>
+          <p style="color:var(--text-dim);font-size:.82rem;margin-bottom:16px">
+            Recompute aggregated records from raw submission data for a specific date.
+          </p>
+          <div class="form-row" style="align-items:flex-end">
+            <div class="form-group" style="flex:1">
+              <label class="form-label" for="reprocess-date">Date</label>
+              <input class="form-input" type="date" id="reprocess-date">
+            </div>
+            <button class="btn btn-primary" id="reprocess-btn" style="margin-bottom:12px">Reprocess</button>
+          </div>
+          <div id="reprocess-result" style="font-size:.82rem;color:var(--text-dim);margin-top:8px"></div>
+        </div>
+
+        <!-- Users Card -->
+        <div class="card">
+          <div class="card-title" style="margin-bottom:16px">👥 Registered Users</div>
+          <div id="users-list" style="max-height:200px;overflow-y:auto"></div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-bottom:28px">
+        <!-- Storage Purge Card -->
+        <div class="card">
+          <div class="card-title" style="margin-bottom:16px">💾 Storage Management (Purge Raw Logs)</div>
+          <p style="color:var(--text-dim);font-size:.82rem;margin-bottom:16px">
+            Download the daily Master Excel Sheet (contains all users' detailed submissions) and immediately purge raw submission records for that date from the database. This keeps your database lightweight and 100% free!
+          </p>
+          <div class="form-row" style="align-items:flex-end">
+            <div class="form-group" style="flex:1">
+              <label class="form-label" for="purge-date">Select Date</label>
+              <input class="form-input" type="date" id="purge-date">
+            </div>
+            <button class="btn btn-danger" id="purge-btn" style="margin-bottom:12px">Download & Purge</button>
+          </div>
+          <div id="purge-result" style="font-size:.82rem;color:var(--text-dim);margin-top:8px"></div>
+        </div>
+
+        <!-- System Status Info -->
+        <div class="card">
+          <div class="card-title" style="margin-bottom:16px">⚡ Free Cloud Status Info</div>
+          <p style="color:var(--text-dim);font-size:.82rem;margin-bottom:12px">
+            Your system is optimized to run 100% free! The daily dashboard summaries (totals) are preserved forever in the database, while heavy raw logs can be downloaded and cleared daily above.
+          </p>
+          <ul style="color:var(--text-dim);font-size:.8rem;padding-left:16px;line-height:1.5;margin-bottom:0">
+            <li><strong>Summary Scores</strong>: Preserved indefinitely (takes almost 0 space).</li>
+            <li><strong>Raw Submission Logs</strong>: Exceeds free tier limits if kept long-term.</li>
+            <li><strong>Recommendation</strong>: Download and purge every morning or evening.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Audit Log -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📋 Audit Log</div>
+          <button class="btn btn-sm btn-ghost" id="refresh-audit-btn">Refresh</button>
+        </div>
+        <div class="table-wrap" style="max-height:500px;overflow-y:auto">
+          <table class="data-table">
+            <thead><tr><th>Time</th><th>Action</th><th>User</th><th>Submission ID</th><th>Details</th></tr></thead>
+            <tbody id="audit-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/utils.js"></script>
+<script>
+let currentUser = null;
+(async () => {
+  currentUser = await requireLogin();
+  if (!currentUser) return;
+  buildNav(currentUser, 'admin');
+  document.getElementById('reprocess-date').value = getTodayISO();
+  document.getElementById('purge-date').value = getTodayISO();
+
+  document.getElementById('reprocess-btn').addEventListener('click', reprocessDay);
+  document.getElementById('purge-btn').addEventListener('click', purgeDay);
+  document.getElementById('refresh-audit-btn').addEventListener('click', loadAudit);
+
+  await Promise.all([loadUsers(), loadAudit()]);
+})();
+
+async function loadUsers() {
+  try {
+    const data = await api('/api/users');
+    const container = document.getElementById('users-list');
+    if (!data.users || data.users.length === 0) {
+      container.innerHTML = '<p style="color:var(--text-muted);font-size:.82rem">No users</p>';
+      return;
+    }
+    container.innerHTML = data.users.map(u => `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-size:.85rem;font-weight:600">${escapeHTML(u.display_name)}</div>
+          <div style="font-size:.72rem;color:var(--text-muted)">${escapeHTML(u.email)}</div>
+        </div>
+        <span class="badge ${u.role === 'admin' ? 'badge-return' : 'badge-fresh'}">${u.role}</span>
+      </div>
+    `).join('');
+  } catch { showToast('Failed to load users', 'error'); }
+}
+
+async function loadAudit() {
+  try {
+    const data = await api('/api/audit');
+    const tbody = document.getElementById('audit-tbody');
+    if (!data.logs || data.logs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:32px">No audit entries</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.logs.map(l => {
+      let details = l.details || '';
+      try { if (typeof details === 'string' && details.startsWith('{')) details = JSON.stringify(JSON.parse(details), null, 0); } catch {}
+      return `<tr>
+        <td style="font-size:.78rem;white-space:nowrap">${new Date(l.created_at).toLocaleString()}</td>
+        <td><span class="badge badge-fresh">${escapeHTML(l.action)}</span></td>
+        <td style="font-size:.82rem">${escapeHTML(l.user_email || '-')}</td>
+        <td style="font-size:.72rem;font-family:monospace;max-width:120px;overflow:hidden;text-overflow:ellipsis">${escapeHTML(l.submission_id || '-')}</td>
+        <td style="font-size:.72rem;max-width:240px;overflow:hidden;text-overflow:ellipsis" title="${escapeHTML(details)}">${escapeHTML(details)}</td>
+      </tr>`;
+    }).join('');
+  } catch { showToast('Failed to load audit log', 'error'); }
+}
+
+async function reprocessDay() {
+  const date = document.getElementById('reprocess-date').value;
+  const resultEl = document.getElementById('reprocess-result');
+  try {
+    const data = await api('/api/reprocess', { method: 'POST', body: { date } });
+    resultEl.innerHTML = `<span style="color:var(--success)">✓ Reprocessed ${data.results.length} user(s) for ${date}</span>`;
+    showToast('Reprocessing complete', 'success');
+  } catch (err) {
+    resultEl.innerHTML = `<span style="color:var(--danger)">${err.error || 'Reprocess failed'}</span>`;
+    showToast(err.error || 'Reprocess failed', 'error');
+  }
+}
+
+async function purgeDay() {
+  const date = document.getElementById('purge-date').value;
+  const resultEl = document.getElementById('purge-result');
+  const btn = document.getElementById('purge-btn');
+
+  if (!date) {
+    showToast('Please select a valid date', 'error');
+    return;
+  }
+
+  if (!confirm(`⚠️ WARNING:\n\nThis will download the Master Excel Report for ${date} and PERMANENTLY DELETE all detailed raw submission logs for this date from the database to clear storage space.\n\nAre you sure you want to proceed?`)) {
+    return;
+  }
+
+  btn.disabled = true;
+  resultEl.innerHTML = `<span style="color:var(--text-dim)">Processing download and database purge...</span>`;
+
+  try {
+    const response = await fetch(`/api/admin/export-purge?date=${date}`, {
+      credentials: 'same-origin',
+      headers: {
+        'Accept': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const errData = await response.json();
+      throw new Error(errData.error || 'Export failed');
+    }
+
+    // Trigger file download using blob
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const [y, m, d] = date.split('-');
+    a.download = `MASTER_${d}${m}${y.slice(2)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+
+    resultEl.innerHTML = `<span style="color:var(--success)">✓ Master report downloaded successfully. Raw submissions for ${date} have been purged!</span>`;
+    showToast('Download and database purge complete', 'success');
+    await loadAudit(); // Refresh the audit log list to show the new entry!
+  } catch (err) {
+    resultEl.innerHTML = `<span style="color:var(--danger)">${err.message || 'Purge failed'}</span>`;
+    showToast(err.message || 'Purge failed', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>

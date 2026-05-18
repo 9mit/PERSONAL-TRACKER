@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Personal Tracker — Login</title>
+  <meta name="description" content="Production-grade annotation tracking with live aggregation, time slots, and spreadsheet exports">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="auth-page">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <h1>📊 TRACKER<span>PRO</span></h1>
+        <p>Annotation Tracking System</p>
+      </div>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tab-login" type="button">Sign In</button>
+        <button class="auth-tab" id="tab-register" type="button">Register</button>
+      </div>
+
+      <!-- Login Form -->
+      <form id="login-form" aria-label="Login form">
+        <div class="form-group">
+          <label class="form-label" for="login-email">Email</label>
+          <input class="form-input" type="email" id="login-email" placeholder="you@company.com" required autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="login-password">Password</label>
+          <input class="form-input" type="password" id="login-password" placeholder="••••••••" required autocomplete="current-password" minlength="6">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="login-btn">Sign In</button>
+      </form>
+
+      <!-- Register Form -->
+      <form id="register-form" style="display:none" aria-label="Registration form">
+        <div class="form-group">
+          <label class="form-label" for="reg-name">Display Name</label>
+          <input class="form-input" type="text" id="reg-name" placeholder="Your Name" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="reg-email">Email</label>
+          <input class="form-input" type="email" id="reg-email" placeholder="you@company.com" required autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="reg-password">Password</label>
+          <input class="form-input" type="password" id="reg-password" placeholder="Min 8 chars with number & symbol" required minlength="8">
+        </div>
+
+        <button type="submit" class="btn btn-accent btn-block btn-lg" id="reg-btn">Create Account</button>
+      </form>
+
+      <div id="auth-error" class="form-error" style="text-align:center;margin-top:16px"></div>
+    </div>
+  </div>
+
+  <script src="/js/utils.js"></script>
+  <script>
+    // Auto-redirect if already logged in
+    (async () => {
+      const user = await checkAuth();
+      if (user) window.location.href = '/app';
+    })();
+
+
+
+    // Tab switching via addEventListener (no inline handlers)
+    function switchTab(tab) {
+      document.getElementById('tab-login').classList.toggle('active', tab === 'login');
+      document.getElementById('tab-register').classList.toggle('active', tab === 'register');
+      document.getElementById('login-form').style.display = tab === 'login' ? 'block' : 'none';
+      document.getElementById('register-form').style.display = tab === 'register' ? 'block' : 'none';
+      document.getElementById('auth-error').textContent = '';
+    }
+
+    document.getElementById('tab-login').addEventListener('click', () => switchTab('login'));
+    document.getElementById('tab-register').addEventListener('click', () => switchTab('register'));
+
+    // Login handler
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('login-btn');
+      const errEl = document.getElementById('auth-error');
+      btn.disabled = true; btn.textContent = 'Signing in...'; errEl.textContent = '';
+      try {
+        await api('/api/login', {
+          method: 'POST',
+          body: { email: document.getElementById('login-email').value, password: document.getElementById('login-password').value }
+        });
+        window.location.href = '/app';
+      } catch (err) {
+        errEl.textContent = err.error || 'Login failed';
+        btn.disabled = false; btn.textContent = 'Sign In';
+      }
+    });
+
+    // Register handler
+    document.getElementById('register-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('reg-btn');
+      const errEl = document.getElementById('auth-error');
+      btn.disabled = true; btn.textContent = 'Creating...'; errEl.textContent = '';
+      try {
+        await api('/api/register', {
+          method: 'POST',
+          body: {
+            email: document.getElementById('reg-email').value,
+            displayName: document.getElementById('reg-name').value,
+            password: document.getElementById('reg-password').value,
+            timezone: 'Asia/Kolkata'
+          }
+        });
+        window.location.href = '/app';
+      } catch (err) {
+        errEl.textContent = err.error || 'Registration failed';
+        btn.disabled = false; btn.textContent = 'Create Account';
+      }
+    });
+  </script>
+</body>
+</html>

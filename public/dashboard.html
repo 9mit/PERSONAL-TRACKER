@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — Personal Tracker</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="top-nav" id="top-nav"></nav>
+  <div class="page-content">
+    <div class="container">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;flex-wrap:wrap;gap:12px">
+        <div>
+          <h1 style="font-size:1.6rem;font-weight:800">Live Dashboard</h1>
+          <p style="color:var(--text-dim);font-size:.85rem;margin-top:4px">Aggregated annotation metrics across all annotators</p>
+        </div>
+        <div style="display:flex;gap:12px;align-items:center">
+          <input class="form-input" type="date" id="dash-date" style="width:180px">
+          <div class="live-badge"><span class="live-dot"></span> Live</div>
+        </div>
+      </div>
+
+      <div class="grid-4" style="margin-bottom:28px">
+        <div class="card stat-card"><div class="stat-value" id="total-fresh">0</div><div class="stat-label">Total Fresh</div></div>
+        <div class="card stat-card accent"><div class="stat-value" id="total-return">0</div><div class="stat-label">Total Returns</div></div>
+        <div class="card stat-card success"><div class="stat-value" id="quality-score">100%</div><div class="stat-label">Quality Score</div></div>
+        <div class="card stat-card warning"><div class="stat-value" id="total-users">0</div><div class="stat-label">Active Users</div></div>
+      </div>
+
+      <div class="card" style="margin-bottom:24px">
+        <div class="card-header">
+          <div><div class="card-title">📊 Fresh Annotations by Slot</div><div class="card-subtitle">Per-user daily breakdown</div></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm btn-ghost" id="share-btn">🔗 Share</button>
+            <button class="btn btn-sm btn-ghost" id="export-btn">⬇ Export</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead id="fresh-thead"><tr><th>Annotator</th><th>Email</th><th>Slot 1</th><th>Slot 2</th><th>Slot 3</th><th>Slot 4</th><th>Grand Total</th></tr></thead>
+            <tbody id="fresh-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div><div class="card-title">🔄 Total Annotations vs Returns</div><div class="card-subtitle">Quality metrics per annotator</div></div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Annotator</th><th>Fresh Total</th><th>Return Total</th><th>Grand Total</th><th>Quality %</th></tr></thead>
+            <tbody id="quality-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Persistent Active Shared Links Card -->
+      <div class="card" id="shared-links-card" style="margin-top:24px;display:none">
+        <div class="card-header">
+          <div>
+            <div class="card-title">🔗 Your Shared Links</div>
+            <div class="card-subtitle">Manage active public dashboard links — revoke anytime</div>
+          </div>
+          <span id="shared-links-count" style="font-size:.75rem;color:var(--text-muted);font-weight:700;background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.3);padding:4px 12px;border-radius:20px">0 active</span>
+        </div>
+        <div id="shared-links-list"></div>
+        <div id="shared-links-empty" style="display:none;text-align:center;padding:20px;color:var(--text-muted);font-size:.85rem">
+          No active shared links. Use the 🔗 Share button above to create one.
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Share Modal -->
+<div id="share-overlay" class="modal-overlay">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-icon">🔗</div>
+    <div class="modal-title">Share Live Dashboard</div>
+    <div class="modal-text" style="margin-bottom:20px">Generate a public link that anyone can use to view this dashboard in real-time — no login required.</div>
+
+    <div class="form-group">
+      <label class="form-label">Link Expires In</label>
+      <select class="form-select" id="share-expiry">
+        <option value="1">1 Hour</option>
+        <option value="6">6 Hours</option>
+        <option value="12">12 Hours</option>
+        <option value="24" selected>24 Hours</option>
+        <option value="72">3 Days</option>
+        <option value="168">7 Days</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Label (optional)</label>
+      <input class="form-input" type="text" id="share-label" placeholder="e.g. For Team Lead" maxlength="60">
+    </div>
+
+    <!-- Generated link area (hidden initially) -->
+    <div id="share-result" style="display:none;margin-bottom:24px">
+      <label class="form-label">Your Shareable Link</label>
+      <div style="display:flex;gap:8px">
+        <input class="form-input" type="text" id="share-url" readonly style="font-size:0.82rem;letter-spacing:0.2px">
+        <button class="btn btn-sm btn-primary" id="copy-link-btn" style="white-space:nowrap">📋 Copy</button>
+      </div>
+      <p class="form-hint" id="share-expiry-text"></p>
+    </div>
+
+    <!-- Active links list -->
+    <div id="active-links" style="display:none;margin-bottom:24px">
+      <label class="form-label">Active Links</label>
+      <div id="active-links-list" style="max-height:160px;overflow-y:auto"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="share-close">Close</button>
+      <button class="btn btn-primary" id="share-generate">Generate Link</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/utils.js"></script>
+<script>
+let currentUser = null;
+let socket = null;
+
+(async () => {
+  currentUser = await requireLogin();
+  if (!currentUser) return;
+  buildNav(currentUser, 'dashboard');
+  document.getElementById('dash-date').value = getTodayISO();
+  document.getElementById('dash-date').addEventListener('change', loadDashboard);
+  document.getElementById('export-btn').addEventListener('click', exportDashboard);
+  await loadDashboard();
+
+  const throttledLoadDashboard = throttle(loadDashboard, 3000);
+  socket = connectSocket(currentUser.email, getTodayISO());
+  if (socket) {
+    socket.on('submission_new', () => throttledLoadDashboard());
+    socket.on('dashboard_refresh', () => loadDashboard());
+  }
+
+  // Share modal
+  document.getElementById('share-btn').addEventListener('click', openShareModal);
+  document.getElementById('share-close').addEventListener('click', closeShareModal);
+  document.getElementById('share-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'share-overlay') closeShareModal();
+  });
+  document.getElementById('share-generate').addEventListener('click', generateShareLink);
+  document.getElementById('copy-link-btn').addEventListener('click', copyShareLink);
+
+  // Event delegation for revoke buttons (CSP-safe — no inline onclick)
+  document.addEventListener('click', (e) => {
+    const revokeBtn = e.target.closest('[data-revoke-token]');
+    if (revokeBtn) {
+      revokeLink(revokeBtn.getAttribute('data-revoke-token'));
+    }
+  });
+
+  // Load shared links on page init
+  await refreshAllSharedLinks();
+})();
+
+function throttle(func, limit) {
+  let inThrottle;
+  return function() {
+    const args = arguments;
+    const context = this;
+    if (!inThrottle) {
+      func.apply(context, args);
+      inThrottle = true;
+      setTimeout(() => inThrottle = false, limit);
+    }
+  }
+}
+
+async function loadDashboard() {
+  const date = document.getElementById('dash-date').value;
+  try {
+    const data = await api(`/api/dashboard?date=${date}`);
+    document.getElementById('total-fresh').textContent = data.totalFresh;
+    document.getElementById('total-return').textContent = data.totalReturn;
+    document.getElementById('quality-score').textContent = data.qualityScore + '%';
+    document.getElementById('total-users').textContent = data.users.length;
+
+    // Build table header based on maxSlots
+    const cols = data.maxSlots || 4;
+    let headerHTML = '<tr><th>Annotator</th><th>Email</th>';
+    for (let i = 1; i <= cols; i++) {
+      headerHTML += `<th>Slot ${i}</th>`;
+    }
+    headerHTML += '<th>Grand Total</th></tr>';
+    document.getElementById('fresh-thead').innerHTML = headerHTML;
+
+    const emptyRow = (colSpan, msg) => `<tr><td colspan="${colSpan}" style="text-align:center;color:var(--text-muted);padding:32px">${msg}</td></tr>`;
+
+    document.getElementById('fresh-tbody').innerHTML = data.users.length === 0 ? emptyRow(cols + 3, 'No data for this date') :
+      data.users.map(u => {
+        let slotsHTML = '';
+        for (let i = 0; i < cols; i++) {
+          const val = i < u.configuredSlots ? u.slots.fresh[i] : '-';
+          slotsHTML += `<td class="slot-cell slot-fresh" style="${val === '-' ? 'color:var(--text-muted)' : ''}">${val}</td>`;
+        }
+        return `<tr>
+          <td style="font-weight:600">${escapeHTML(u.displayName)}</td>
+          <td style="color:var(--text-dim);font-size:.82rem">${escapeHTML(u.email)}</td>
+          ${slotsHTML}
+          <td class="slot-cell" style="font-weight:800;font-size:1.05rem">${u.totalFresh}</td>
+        </tr>`;
+      }).join('');
+
+    document.getElementById('quality-tbody').innerHTML = data.users.length === 0 ? emptyRow(5, 'No data') :
+      data.users.map(u => {
+        const total = u.totalFresh + u.totalReturn;
+        const qColor = u.quality >= 90 ? 'var(--success)' : u.quality >= 70 ? 'var(--warning)' : 'var(--danger)';
+        return `<tr>
+          <td style="font-weight:600">${escapeHTML(u.displayName)}</td>
+          <td class="slot-fresh">${u.totalFresh}</td>
+          <td class="slot-return">${u.totalReturn}</td>
+          <td style="font-weight:700">${total}</td>
+          <td style="font-weight:700;color:${qColor}">${u.quality}%</td>
+        </tr>`;
+      }).join('');
+  } catch (err) {
+    showToast('Failed to load dashboard', 'error');
+  }
+}
+
+async function exportDashboard() {
+  const date = document.getElementById('dash-date').value;
+  try {
+    const response = await fetch(`/api/export/${currentUser.email}/${date}?format=xlsx`, { credentials: 'same-origin' });
+    if (!response.ok) throw new Error('Export failed');
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeName = (currentUser.displayName || 'Dashboard').replace(/[^a-zA-Z0-9]/g, '');
+    const [y, m, d] = date.split('-');
+    a.href = url; a.download = `${safeName}_${d}${m}${y.slice(2)}.xlsx`; a.click();
+    URL.revokeObjectURL(url);
+    showToast('Export downloaded', 'success');
+  } catch { showToast('Export failed', 'error'); }
+}
+
+// ─── Share Modal ────────────────────────────────────────────────────────────────
+
+function openShareModal() {
+  document.getElementById('share-result').style.display = 'none';
+  document.getElementById('share-overlay').classList.add('active');
+  refreshAllSharedLinks();
+}
+
+function closeShareModal() {
+  document.getElementById('share-overlay').classList.remove('active');
+}
+
+async function generateShareLink() {
+  const date = document.getElementById('dash-date').value;
+  const expiresInHours = document.getElementById('share-expiry').value;
+  const label = document.getElementById('share-label').value.trim();
+  const btn = document.getElementById('share-generate');
+
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+
+  try {
+    const result = await api('/api/share', {
+      method: 'POST',
+      body: { date, label: label || undefined, expiresInHours: parseInt(expiresInHours) }
+    });
+
+    document.getElementById('share-url').value = result.url;
+    const expiry = new Date(result.expiresAt);
+    document.getElementById('share-expiry-text').textContent =
+      `Expires ${expiry.toLocaleDateString()} at ${expiry.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    document.getElementById('share-result').style.display = 'block';
+
+    showToast('Share link generated!', 'success');
+    // Refresh both the modal list AND the persistent card
+    await refreshAllSharedLinks();
+  } catch (err) {
+    showToast(err.error || 'Failed to generate link', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate Link';
+  }
+}
+
+function copyShareLink() {
+  const url = document.getElementById('share-url').value;
+  navigator.clipboard.writeText(url).then(() => {
+    showToast('Link copied to clipboard!', 'success');
+    const btn = document.getElementById('copy-link-btn');
+    btn.textContent = '✓ Copied';
+    setTimeout(() => { btn.textContent = '📋 Copy'; }, 2000);
+  }).catch(() => {
+    document.getElementById('share-url').select();
+    showToast('Press Ctrl+C to copy', 'info');
+  });
+}
+
+// ─── Shared Links (renders in BOTH modal and persistent card) ───────────────────
+
+function renderLinkRow(l, context) {
+  const expires = new Date(l.expires_at);
+  const remaining = Math.max(0, Math.round((expires - Date.now()) / (1000 * 60 * 60)));
+  const remainStr = remaining > 24 ? `${Math.round(remaining / 24)}d` : `${remaining}h`;
+  const label = l.label ? escapeHTML(l.label) : l.date;
+  const isCompact = context === 'modal';
+  const created = new Date(l.created_at);
+  const createdStr = created.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  if (isCompact) {
+    // Compact row for the share modal
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-size:.85rem;font-weight:600">${label}</div>
+          <div style="font-size:.72rem;color:var(--text-muted)">${l.date} · expires in ${remainStr}</div>
+        </div>
+        <button class="btn btn-sm btn-ghost" style="color:var(--danger);font-size:.75rem" data-revoke-token="${l.token}">Revoke</button>
+      </div>
+    `;
+  }
+
+  // Rich row for the persistent card
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="width:40px;height:40px;border-radius:12px;background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.25);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0">🔗</div>
+        <div>
+          <div style="font-size:.9rem;font-weight:700">${label}</div>
+          <div style="font-size:.72rem;color:var(--text-muted);margin-top:2px">
+            Created ${createdStr} · Date: ${l.date} · <span style="color:${remaining <= 2 ? 'var(--warning)' : 'var(--text-dim)'}">expires in ${remainStr}</span>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-sm btn-ghost" data-copy-url="${l.token}" style="font-size:.75rem" title="Copy link URL">📋 Copy</button>
+        <button class="btn btn-sm btn-ghost" style="color:var(--danger);font-size:.75rem" data-revoke-token="${l.token}">✕ Revoke</button>
+      </div>
+    </div>
+  `;
+}
+
+async function refreshAllSharedLinks() {
+  try {
+    const data = await api('/api/shares');
+    const activeLinks = data.links.filter(l => !l.is_revoked && new Date(l.expires_at) > new Date());
+
+    // Update modal's active links (inside share modal)
+    loadActiveLinksFromData(activeLinks);
+
+    // Update persistent card (always visible on page)
+    renderPersistentLinksCard(activeLinks);
+  } catch (err) {
+    console.error('Load shared links error:', err);
+  }
+}
+
+// Alias for backward compatibility
+async function loadActiveLinks() {
+  await refreshAllSharedLinks();
+}
+
+function loadActiveLinksFromData(activeLinks) {
+  const container = document.getElementById('active-links');
+  const list = document.getElementById('active-links-list');
+
+  if (activeLinks.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'block';
+  list.innerHTML = activeLinks.map(l => renderLinkRow(l, 'modal')).join('');
+}
+
+function renderPersistentLinksCard(activeLinks) {
+  const card = document.getElementById('shared-links-card');
+  const listEl = document.getElementById('shared-links-list');
+  const emptyEl = document.getElementById('shared-links-empty');
+  const countEl = document.getElementById('shared-links-count');
+
+  // Always show the card so users know the feature exists
+  card.style.display = 'block';
+  countEl.textContent = `${activeLinks.length} active`;
+
+  if (activeLinks.length === 0) {
+    listEl.innerHTML = '';
+    emptyEl.style.display = 'block';
+  } else {
+    emptyEl.style.display = 'none';
+    listEl.innerHTML = activeLinks.map(l => renderLinkRow(l, 'page')).join('');
+
+    // Copy link buttons — delegate events from the list
+    listEl.querySelectorAll('[data-copy-url]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const token = btn.getAttribute('data-copy-url');
+        const protocol = location.protocol;
+        const host = location.host;
+        const url = `${protocol}//${host}/shared/${token}`;
+        try {
+          await navigator.clipboard.writeText(url);
+          showToast('Link copied to clipboard!', 'success');
+          btn.textContent = '✓ Copied';
+          setTimeout(() => { btn.textContent = '📋 Copy'; }, 2000);
+        } catch {
+          showToast('Failed to copy', 'error');
+        }
+      });
+    });
+  }
+}
+
+async function revokeLink(token) {
+  try {
+    await api(`/api/share/${token}`, { method: 'DELETE' });
+    showToast('Link revoked', 'info');
+    await refreshAllSharedLinks();
+  } catch {
+    showToast('Failed to revoke link', 'error');
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shared Dashboard — Personal Tracker</title>
+  <meta name="description" content="Live shared annotation dashboard view">
+  <link rel="stylesheet" href="/css/styles.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    /* ─── Shared Page Enhancements ─────────────────── */
+    .shared-hero {
+      text-align: center;
+      padding: 48px 20px 32px;
+      position: relative;
+      z-index: 1;
+    }
+    .shared-hero .shared-icon {
+      font-size: 3rem;
+      margin-bottom: 16px;
+      display: inline-block;
+      animation: floatBounce 3s ease-in-out infinite;
+    }
+    @keyframes floatBounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-8px); }
+    }
+    .shared-hero h1 {
+      font-size: 1.8rem;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+      /* Fix EC#20: long owner names */
+      overflow-wrap: break-word;
+      word-break: break-word;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .shared-hero h1 span {
+      background: linear-gradient(135deg, var(--primary-light), var(--accent-light));
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .shared-meta {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+    .shared-meta-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 18px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-dim);
+    }
+    .shared-meta-item .meta-icon { font-size: 1rem; }
+    .shared-meta-item .meta-value { color: var(--text); }
+
+    /* Live indicator dot */
+    .live-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      display: inline-block;
+      animation: livePulse 2s ease-in-out infinite;
+    }
+    @keyframes livePulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.6); }
+      50% { box-shadow: 0 0 0 6px rgba(34,197,94,0); }
+    }
+
+    .shared-footer {
+      text-align: center;
+      padding: 40px 20px 60px;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+    }
+
+    /* Expired / Error state */
+    .shared-error {
+      text-align: center;
+      padding: 120px 24px;
+    }
+    .shared-error .error-icon {
+      font-size: 4rem;
+      margin-bottom: 24px;
+      opacity: 0.7;
+      filter: grayscale(0.5);
+    }
+    .shared-error h2 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      margin-bottom: 12px;
+    }
+    .shared-error p {
+      color: var(--text-dim);
+      max-width: 420px;
+      margin: 0 auto;
+      line-height: 1.7;
+    }
+
+    /* Slot cards */
+    .shared-slot-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin: 24px 0;
+    }
+    .shared-slot-card {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+      transition: var(--transition);
+    }
+    .shared-slot-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+      opacity: 0.6;
+    }
+    .shared-slot-card:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-sm);
+      border-color: var(--border-light);
+    }
+    .shared-slot-card:hover::before { opacity: 1; }
+    .shared-slot-label {
+      font-size: 0.7rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1.5px;
+      color: var(--text-dim); margin-bottom: 8px;
+    }
+    .shared-slot-time {
+      font-size: 0.72rem; color: var(--text-muted); margin-top: 6px;
+    }
+    .shared-slot-value {
+      font-size: 2.4rem; font-weight: 900; line-height: 1;
+      background: linear-gradient(135deg, #fff 30%, var(--accent-light));
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .shared-slot-sub {
+      font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;
+    }
+
+    /* Activity feed */
+    .activity-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border);
+      transition: var(--transition-fast);
+    }
+    .activity-item:last-child { border-bottom: none; }
+    .activity-item:hover { padding-left: 6px; }
+    .activity-left { display: flex; align-items: center; gap: 12px; }
+    .activity-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .activity-dot.fresh { background: var(--accent-light); box-shadow: 0 0 6px var(--accent-glow); }
+    .activity-dot.return { background: var(--danger-light); box-shadow: 0 0 6px rgba(239,68,68,0.3); }
+    .activity-task { font-size: 0.88rem; font-weight: 600; }
+    .activity-meta { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
+    .activity-time { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
+
+    /* Expiry countdown badge (EC#15) */
+    .expiry-badge {
+      font-size: 0.72rem; color: var(--text-muted);
+      padding: 4px 12px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      margin-top: 12px;
+      display: inline-block;
+    }
+    .expiry-badge.expiring-soon { color: #f59e0b; border-color: rgba(245,158,11,0.3); }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="top-nav" style="justify-content:center">
+    <div class="nav-brand">📊 PERSONAL<span>TRACKER</span></div>
+  </nav>
+
+  <div class="page-content" id="page-content">
+    <!-- Loading state -->
+    <div id="loading-state" style="text-align:center;padding:120px 24px">
+      <div class="spinner" style="margin:0 auto 20px"></div>
+      <p style="color:var(--text-dim);font-weight:600">Loading shared dashboard…</p>
+    </div>
+
+    <!-- Error state (hidden by default) -->
+    <div id="error-state" style="display:none">
+      <div class="shared-error">
+        <div class="error-icon">🔗</div>
+        <h2 id="error-title">Link Expired</h2>
+        <p id="error-message">This shared dashboard link has expired or has been revoked by the owner.</p>
+      </div>
+    </div>
+
+    <!-- Dashboard content (hidden by default) -->
+    <div id="dashboard-content" style="display:none">
+      <div class="container">
+        <div class="shared-hero">
+          <div class="shared-icon">📊</div>
+          <h1><span id="owner-name"></span>'s Dashboard</h1>
+          <div class="shared-meta">
+            <div class="shared-meta-item">
+              <span class="meta-icon">📅</span>
+              <span class="meta-value" id="shared-date"></span>
+            </div>
+            <div class="shared-meta-item">
+              <span class="live-dot"></span>
+              <span class="meta-value">Live</span>
+            </div>
+          </div>
+          <div id="expiry-countdown" class="expiry-badge" style="display:none"></div>
+        </div>
+
+        <!-- Grand totals -->
+        <div class="grid-4" style="margin-bottom:28px" id="stats-grid">
+          <div class="card stat-card"><div class="stat-value" id="s-total-fresh">0</div><div class="stat-label">Fresh Total</div></div>
+          <div class="card stat-card accent"><div class="stat-value" id="s-total-return">0</div><div class="stat-label">Return Total</div></div>
+          <div class="card stat-card success"><div class="stat-value" id="s-grand-total">0</div><div class="stat-label">Grand Total</div></div>
+          <div class="card stat-card warning"><div class="stat-value" id="s-quality">100%</div><div class="stat-label">Quality</div></div>
+        </div>
+
+        <!-- Per-slot breakdown -->
+        <div class="card" style="margin-bottom:24px">
+          <div class="card-header">
+            <div>
+              <div class="card-title">⏰ Slot Breakdown</div>
+              <div class="card-subtitle">Live annotation counts per time slot</div>
+            </div>
+          </div>
+          <div class="shared-slot-grid" id="slot-grid">
+            <div class="empty-state" style="padding:24px"><p>No slots configured</p></div>
+          </div>
+        </div>
+
+        <!-- Activity feed -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">📋 Activity Feed</div>
+              <div class="card-subtitle">Recent annotations in real-time</div>
+            </div>
+            <span style="font-size:.75rem;color:var(--text-muted)" id="activity-count">0 submissions</span>
+          </div>
+          <div id="activity-feed" style="max-height:420px;overflow-y:auto">
+            <div class="empty-state" style="padding:24px"><div class="empty-icon">📭</div><p>No submissions yet</p></div>
+          </div>
+        </div>
+
+        <div class="shared-footer">
+          <p>This dashboard is shared via <strong>Personal Tracker Pro</strong></p>
+          <p style="margin-top:6px">Data refreshes automatically in real-time.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── State ──────────────────────────────────────────────────────────────────────
+let _expiresAt = null;
+let _expiryInterval = null;
+
+// ─── Shared Dashboard Logic ─────────────────────────────────────────────────────
+(async () => {
+  const pathParts = window.location.pathname.split('/');
+  const token = pathParts[pathParts.length - 1];
+
+  if (!token || !/^[A-Za-z0-9_-]+$/.test(token)) {
+    showError('Invalid Link', 'This link appears to be malformed.');
+    return;
+  }
+
+  // Initial load via REST (first paint)
+  const data = await fetchSharedData(token);
+  if (!data) return;
+
+  renderDashboard(data);
+  startExpiryCountdown(data.expiresAt);
+
+  // ─── Socket.IO: receive full payload directly (no REST re-fetch) ────────────
+  if (typeof io !== 'undefined') {
+    const socket = io({ transports: ['websocket', 'polling'] });
+
+    socket.on('connect', () => {
+      socket.emit('join_shared', token);
+    });
+
+    // Server now pushes the complete dashboard payload — zero REST calls needed (EC#8 fix)
+    socket.on('shared_update', (payload) => {
+      if (payload && payload.dayRecord !== undefined) {
+        renderDashboard(payload);
+      }
+    });
+
+    // Server validated the token and it's dead — instant lockout
+    socket.on('shared_expired', () => {
+      showError('Link Expired or Revoked', 'The owner has revoked this link or it has expired.');
+    });
+
+    // Server sends expiry metadata on successful join
+    socket.on('shared_meta', ({ expiresAt }) => {
+      if (expiresAt) startExpiryCountdown(expiresAt);
+    });
+
+    socket.on('reconnect', () => {
+      socket.emit('join_shared', token);
+      // Jittered data refresh on reconnect (EC#24)
+      setTimeout(async () => {
+        const freshData = await fetchSharedData(token, true);
+        if (freshData) renderDashboard(freshData);
+      }, Math.floor(Math.random() * 3000));
+    });
+  }
+
+  // Fallback polling every 60s (extended from 30s since WS now carries payload)
+  setInterval(async () => {
+    const freshData = await fetchSharedData(token, true);
+    if (freshData) {
+      renderDashboard(freshData);
+    } else {
+      // Silent fetch failed — link may have expired
+      showError('Link Expired or Revoked', 'This shared dashboard link has expired or been revoked.');
+    }
+  }, 60000);
+})();
+
+async function fetchSharedData(token, silent = false) {
+  try {
+    const res = await fetch(`/api/shared/${encodeURIComponent(token)}`);
+    const data = await res.json();
+
+    if (!res.ok) {
+      if (!silent) {
+        if (res.status === 404) {
+          showError('Link Expired or Revoked', data.error || 'This shared dashboard link has expired or has been revoked by the owner.');
+        } else if (res.status === 400) {
+          showError('Invalid Link', data.error || 'This link appears to be malformed.');
+        } else {
+          showError('Something Went Wrong', data.error || 'An unexpected error occurred.');
+        }
+      }
+      return null;
+    }
+    return data;
+  } catch (err) {
+    if (!silent) {
+      showError('Connection Error', 'Unable to reach the server. Please check your internet connection.');
+    }
+    return null;
+  }
+}
+
+function showError(title, message) {
+  document.getElementById('loading-state').style.display = 'none';
+  document.getElementById('dashboard-content').style.display = 'none';
+  document.getElementById('error-state').style.display = 'block';
+  document.getElementById('error-title').textContent = title;
+  document.getElementById('error-message').textContent = message;
+  if (_expiryInterval) { clearInterval(_expiryInterval); _expiryInterval = null; }
+}
+
+// ─── Expiry Countdown (EC#15) ───────────────────────────────────────────────────
+
+function startExpiryCountdown(expiresAt) {
+  if (!expiresAt) return;
+  _expiresAt = new Date(expiresAt).getTime();
+  const el = document.getElementById('expiry-countdown');
+  el.style.display = 'inline-block';
+
+  const tick = () => {
+    const remaining = _expiresAt - Date.now();
+    if (remaining <= 0) {
+      clearInterval(_expiryInterval);
+      showError('Link Expired', 'This shared dashboard link has expired.');
+      return;
+    }
+    const hours = Math.floor(remaining / (1000 * 60 * 60));
+    const mins = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+    if (remaining < 60 * 60 * 1000) {
+      el.classList.add('expiring-soon');
+      el.textContent = `⚠ Expires in ${mins}m`;
+    } else {
+      el.classList.remove('expiring-soon');
+      el.textContent = `⏱ Expires in ${hours}h ${mins}m`;
+    }
+  };
+
+  if (_expiryInterval) clearInterval(_expiryInterval);
+  tick(); // Run immediately
+  _expiryInterval = setInterval(tick, 30000);
+}
+
+// ─── Render ─────────────────────────────────────────────────────────────────────
+
+function renderDashboard(data) {
+  document.getElementById('loading-state').style.display = 'none';
+  document.getElementById('error-state').style.display = 'none';
+  document.getElementById('dashboard-content').style.display = 'block';
+
+  const { owner, date, dayRecord, slots, submissions } = data;
+
+  document.getElementById('owner-name').textContent = owner || 'Unknown';
+  const d = new Date(date + 'T00:00:00');
+  document.getElementById('shared-date').textContent = d.toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+  document.title = `${owner}'s Dashboard — ${date}`;
+
+  // Grand totals
+  const fresh = dayRecord ? (dayRecord.grand_total_fresh || 0) : 0;
+  const ret = dayRecord ? (dayRecord.grand_total_return || 0) : 0;
+  const total = fresh + ret;
+  const quality = total > 0 ? Math.round((fresh / total) * 100) : 100;
+
+  animateValue('s-total-fresh', fresh);
+  animateValue('s-total-return', ret);
+  animateValue('s-grand-total', total);
+  document.getElementById('s-quality').textContent = quality + '%';
+
+  // Slot grid
+  const slotGrid = document.getElementById('slot-grid');
+  if (!slots || slots.length === 0) {
+    slotGrid.innerHTML = '<div class="empty-state" style="padding:24px"><p>No slots configured</p></div>';
+  } else {
+    slotGrid.innerHTML = slots.map(s => {
+      const slotFresh = dayRecord ? (dayRecord[`slot${s.slot_index}_fresh`] || 0) : 0;
+      const slotReturn = dayRecord ? (dayRecord[`slot${s.slot_index}_return`] || 0) : 0;
+      return `
+        <div class="shared-slot-card">
+          <div class="shared-slot-label">Slot ${s.slot_index}</div>
+          <div class="shared-slot-value">${slotFresh}</div>
+          <div class="shared-slot-sub">${slotReturn} return${slotReturn !== 1 ? 's' : ''}</div>
+          <div class="shared-slot-time">${formatTime12h(s.start_time)} – ${formatTime12h(s.end_time)}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Activity feed
+  const feed = document.getElementById('activity-feed');
+  const subArr = submissions || [];
+  document.getElementById('activity-count').textContent = `${subArr.length} submission${subArr.length !== 1 ? 's' : ''}`;
+
+  if (subArr.length === 0) {
+    feed.innerHTML = '<div class="empty-state" style="padding:24px"><div class="empty-icon">📭</div><p>No submissions yet</p></div>';
+  } else {
+    feed.innerHTML = subArr.slice().reverse().map(s => {
+      const time = new Date(s.timestamp_utc).toLocaleTimeString('en-US', {
+        hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
+      });
+      return `
+        <div class="activity-item">
+          <div class="activity-left">
+            <div class="activity-dot ${esc(s.type)}"></div>
+            <div>
+              <div class="activity-task">${esc(s.task_id)}</div>
+              <div class="activity-meta">Slot ${s.assigned_slot_index} · ${s.questions_count} Q · ${esc(s.type)}</div>
+            </div>
+          </div>
+          <div class="activity-time">${time}</div>
+        </div>
+      `;
+    }).join('');
+  }
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────────
+
+function animateValue(id, target) {
+  const el = document.getElementById(id);
+  const current = parseInt(el.textContent) || 0;
+  if (current === target) return;
+  el.textContent = target;
+  el.style.transform = 'scale(1.15)';
+  el.style.transition = 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+  setTimeout(() => { el.style.transform = 'scale(1)'; }, 300);
+}
+
+function formatTime12h(time24) {
+  if (!time24) return '';
+  const [h, m] = time24.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+function esc(str) {
+  if (str == null) return '';
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+</script>
+</body>
+</html>
